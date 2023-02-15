@@ -1,0 +1,13 @@
+# vim: set ft=bash:
+# shellcheck disable=SC2148 # This is a lib to be sourced, we don't want a shebang
+
+test -n "${__TEMPLATE_SHLIB-}" && return
+TEMPLATE_SHLIB_NAME="$(basename "${BASH_SOURCE[0]}")"
+TEMPLATE_SHLIB_ROOT="$(dirname  "${BASH_SOURCE[0]}")"
+# shellcheck disable=SC2034   # this prevent sourcing shlib twice
+declare -r __TEMPLATE_SHLIB="${TEMPLATE_SHLIB_NAME}"
+
+# shellcheck source=src/main/bash/log.shlib
+source "${TEMPLATE_SHLIB_ROOT}/log.shlib"
+
+# TODO: Start coding here!
