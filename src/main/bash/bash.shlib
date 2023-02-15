@@ -1,0 +1,133 @@
+# vim: set ft=bash:
+# shellcheck disable=SC2148 # This is a lib to be sourced, we don't want a shebang
+
+test -n "${__BASH_SHLIB-}" && return
+BASH_SHLIB_NAME="$(basename "${BASH_SOURCE[0]}")"
+BASH_SHLIB_ROOT="$(dirname  "${BASH_SOURCE[0]}")"
+# shellcheck disable=SC2034   # this prevent sourcing shlib twice
+declare -r __BASH_SHLIB="${BASH_SHLIB_NAME}"
+
+# shellcheck source=src/main/bash/log.shlib
+source "${BASH_SHLIB_ROOT}/log.shlib"
+
+# Check if the current version of BASH meets the target requirements.
+#
+# $1 - The minimum version to meet the requirements
+#
+# Returns code 0 if BASH version is greater than, or equal to, the target version.
+# Returns code 1 if BASH version is lower than the target version.
+# Example:
+# ```
+# if bash_version_required "4.4"; then
+#   echo "BASH version greater than or equal to 4.4"
+# fi
+# ```
+function bash_version_required() {
+  local -r _bash_minimum_version="$1"; shift
+  local -i _v
+  local -i _bash_v
+  local _r
+  local _bash_r
+
+  _v="${_bash_minimum_version%%.*}"
+  _r="${_bash_minimum_version#*.}"
+  _bash_v="${BASH_VERSION%%.*}"
+  _bash_r="${BASH_VERSION#*.}"
+  while true; do
+    if [ "${_v}" -gt "${_bash_v}" ]; then
+      return 1
+    fi
+    if [ "${_v}" -lt "${_bash_v}" ]; then
+      break
+    fi
+    if [ -z "${_r}" ]; then
+      break
+    fi
+    _v="${_r%%.*}"
+    if echo "${_r}" | grep -q '\.'; then
+      _r="${_r#*.}"
+    else
+      _r=""
+    fi
+    _bash_v="${_bash_r%%.*}"
+    _bash_r="${_bash_r#*.}"
+  done
+
+  return 0;
+}
+
+# Print the index of the value in the given array.
+#
+# $1 - The value to find in the array
+# $2 - The array to look the value for
+#
+# Returns the index of the value in the array, starting with 0 (zero), -1 if the value is not in the array.
+function bash_array_index_of() {
+  local -r _value="$1"; shift
+  if bash_version_required "4.4"; then
+    local -n _array=$1
+  else
+    # shellcheck disable=SC2086 # We can't double quote ${1#*=}, used to workaround old BASH version 😕
+    eval "declare -A _array="${1#*=}
+  fi; shift
+  local -i _index;
+  for _index in "${!_array[@]}"; do
+    if [ "${_array[${_index}]}" == "${_value}" ]; then
+      break
+    fi
+  done
+  if [ "${_array[${_index}]}" == "${_value}" ]; then
+    echo "${_index}"
+  else
+    echo "-1"
+  fi
+}
+
+declare -A _BASH_TRAP_COMMANDS
+
+declare -i _BASH_EXIT_CODE
+
+# Function that helps trapping signal and checking if there was an error before the trap.
+#
+# Returns true if the exit code of the last executed command before a signal was trapped, was greater than 0.
+function bash_there_was_an_error() {
+  test -n "${_BASH_EXIT_CODE-}" && test "${_BASH_EXIT_CODE}" -gt 0
+}
+
+function _bash_do_trap_signal() {
+  _BASH_EXIT_CODE=$?
+  local -r _bash_trap_signal=$1; shift
+  eval "${_BASH_TRAP_COMMANDS[${_bash_trap_signal}]}"
+}
+
+# Append a command to trap signal
+#
+# $1 - the command to run on signal
+# $... - the signals to bind the command to, more than one supported
+function bash_trap() {
+  local _bash_trap_cmd=$1; shift || fatal "bash_trap usage error: missing command"
+  local _bash_trap_signal
+  for _bash_trap_signal in "$@"; do
+    if [ -z "${_BASH_TRAP_COMMANDS[${_bash_trap_signal}]-}" ]; then
+      _BASH_TRAP_COMMANDS[${_bash_trap_signal}]="$_bash_trap_cmd"
+    else
+      _BASH_TRAP_COMMANDS[${_bash_trap_signal}]="${_BASH_TRAP_COMMANDS[${_bash_trap_signal}]}; $_bash_trap_cmd"
+    fi
+    trap -- "_bash_do_trap_signal ${_bash_trap_signal}" "${_bash_trap_signal}" \
+      || fatal "unable to add to trap ${_bash_trap_signal}"
+  done
+}
+
+# Test if the input is an integer value.
+#
+# $1 — Value to test if it's an integer
+#
+# Returns 0 if true, 1 otherwise
+function bash_is_integer() {
+  case "$1" in
+    ''|*[!0-9]*) return 1
+      ;;
+    *) return 0
+      ;;
+  esac
+}
