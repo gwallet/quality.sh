@@ -1,0 +1,89 @@
+# vim: set ft=bash:
+# shellcheck disable=SC2148 # This is a lib to be sourced, we don't want a shebang
+
+set -o errexit
+set -o nounset
+set -o pipefail
+shopt -s lastpipe
+
+test -n "${__TEST_SHLIB-}" && return
+TEST_SHLIB_NAME="$(basename "${BASH_SOURCE[0]}")"
+#TEST_SHLIB_ROOT="$(dirname  "${BASH_SOURCE[0]}")"
+# shellcheck disable=SC2034   # this prevent sourcing shlib twice
+__TEST_SHLIB="${TEST_SHLIB_NAME}"
+
+declare TEST_DEBUG_MODE_ENABLED="false"
+declare TEST_QUIET_MODE_ENABLED="false"
+while [ $# -gt 0 ]; do
+  option="$1"; shift
+  case "${option}" in
+    --debug)
+      set -x
+      # shellcheck disable=SC2034 # This could be useful in test scripts
+      TEST_DEBUG_MODE_ENABLED="true"
+      ;;
+    --quiet)
+      TEST_QUIET_MODE_ENABLED="true"
+      ;;
+  esac
+done
+
+if [ -z "${EXEC_NAME-}" ]; then
+  declare EXEC_NAME
+  EXEC_NAME="$(basename "$(readlink -f "$0")")"
+  readonly EXEC_NAME
+fi
+
+declare _TEST_TRS_FILE
+_TEST_TRS_FILE=$(mktemp -t "${EXEC_NAME%*.sh}.XXX.trs")
+readonly _TEST_TRS_FILE
+
+declare _test_no=0
+
+function _test_out() {
+  echo "$@" >> "${_TEST_TRS_FILE}"
+}
+
+function test_ok() {
+  _test_no=$((_test_no + 1))
+  _test_out "ok ${_test_no} - ${EXEC_NAME}:${BASH_LINENO[0]} - $*"
+}
+
+function test_not_ok() {
+  local -r message="${1}"; shift
+  local -r expected="${1-}"; test -n "${expected}" && shift
+  local -r actual="${1-}"; test -n "${actual}" && shift
+  local text
+  if [ -n "${expected}" ]; then
+    text=$( printf "%s\n  ---\n  expecting: '%s'\n  got: '%s'\n  ..." "${message}" "${expected}" "${actual}" )
+  else
+    text="${message}"
+  fi
+  _test_no=$((_test_no + 1))
+  _test_out "not ok ${_test_no} - ${EXEC_NAME}:${BASH_LINENO[0]} - ${text}"
+}
+
+function _test_on_exit() {
+  local -i -r _test_exit_code=$?
+  if [ ${_test_no} -lt 1 ]; then
+    test_not_ok "No test run"
+  fi
+  _test_out "1..${_test_no}"
+  local _test_result
+  if grep -q '^not ok' "${_TEST_TRS_FILE}"; then
+    _test_result=1
+  else
+    _test_result="${_test_exit_code}"
+  fi
+  if [ "${TEST_QUIET_MODE_ENABLED}" == "false" ] || [ "${_test_result}" -gt 0 ]; then
+    cat "${_TEST_TRS_FILE}"
+  fi
+  rm -f "${_TEST_TRS_FILE}"
+  return $_test_result
+}
+
+_test_out "TAP version 14"
+
+trap _test_on_exit EXIT
+
+#test_not_ok "a failing test"
