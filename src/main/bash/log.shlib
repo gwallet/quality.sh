@@ -1,0 +1,89 @@
+# vim: set ft=bash:
+# shellcheck disable=SC2148 # This is a lib to be sourced, we don't want a shebang
+
+test -n "${__LOG_SHLIB-}" && return
+LOG_SHLIB_NAME="$(basename "${BASH_SOURCE[0]}")"
+#LOG_SHLIB_ROOT="$(dirname  "${BASH_SOURCE[0]}")"
+# shellcheck disable=SC2034   # this prevent sourcing shlib twice
+declare -r __LOG_SHLIB="${LOG_SHLIB_NAME}"
+
+declare -r -a _LOG_LEVELS=( 'DEBUG' 'INFO' 'WARN' 'ERROR' 'FATAL' )
+declare -r -i _LOG_DEFAULT_LEVEL=0
+declare -i _LOG_MINIMUM_LEVEL=${_LOG_DEFAULT_LEVEL}
+declare _LOG_FILE
+
+# Set the current log level
+#
+# $1 the log level to set among: 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL'.
+#
+# Returns true, false if the level does not exist.
+function log_set_level() {
+  local -r level="$(echo "$1" | tr '[:lower:]' '[:upper:]')"
+  for _LOG_MINIMUM_LEVEL in "${!_LOG_LEVELS[@]}"; do
+    if [ "${_LOG_LEVELS[${_LOG_MINIMUM_LEVEL}]}" == "${level}" ]; then
+      break;
+    fi
+  done
+  test "${_LOG_LEVELS[${_LOG_MINIMUM_LEVEL}]}" == "${level}"
+}
+
+# Get the current log level
+function log_get_level() {
+  printf "%s" "${_LOG_LEVELS[_LOG_MINIMUM_LEVEL]}"
+}
+
+# Check if the log level is enabled
+#
+# $1 The log level to check
+#
+# Returns true if enabled, false otherwise.
+function log_is_level_enabled() {
+  local -r level="$(echo "$1" | tr '[:lower:]' '[:upper:]')"; shift
+  local -i logging_level
+  for logging_level in "${!_LOG_LEVELS[@]}"; do
+    if [ "${_LOG_LEVELS[${logging_level}]}" == "${level}" ]; then
+      break;
+    fi
+  done
+  test "${_LOG_LEVELS[${logging_level}]}" == "${level}" \
+    && test "${logging_level}" -ge "${_LOG_MINIMUM_LEVEL}"
+}
+
+# Set the file in which the stdout & stderr will output
+#
+# $1 - The log file path
+#
+# Returns nothing
+function log_set_file() {
+  if [ -z "${_LOG_FILE-}" ]; then
+    _LOG_FILE=${1}; shift
+    if [ "${_LOG_FILE}" == "-" ]; then
+      unset _LOG_FILE
+      return 0
+    fi
+    touch "${_LOG_FILE}"
+    exec > >(tee --append "${_LOG_FILE}") 2>&1
+  fi
+}
+
+# Returns the file in which stdout @ stderr will output.
+function log_get_file() {
+  if [ -z "${_LOG_FILE-}" ]; then
+    echo "-"
+  else
+    printf "%s" "${_LOG_FILE}"
+  fi
+}
+
+function _log_() {
+  local -r level="$(echo "$1" | tr '[:lower:]' '[:upper:]')"; shift
+  log_is_level_enabled "${level}" \
+    && printf "%s [%-5s] %s\n" "$(date "+[%Y/%m/%d %T %z]")" "${level}" "$*"
+  return 0
+}
+
+function log_d() { _log_ "DEBUG" "$@"; }
+function log_i() { _log_ "INFO"  "$@"; }
+function log_w() { _log_ "WARN"  "$@"; }
+function log_e() { _log_ "ERROR" "$@"; }
+function fatal() { _log_ "FATAL" "$@"; echo; exit 1; }
